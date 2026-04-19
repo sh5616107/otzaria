@@ -223,6 +223,45 @@ void main() {
       expect(find.text('ספר פעיל'), findsOneWidget);
     });
 
+    testWidgets('retry reloads data error and reruns progress', (tester) async {
+      final dataProvider = _RetryableShamorZachorDataProvider();
+      final progressProvider = _CountingShamorZachorProgressProvider();
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<ShamorZachorDataProvider>.value(
+              value: dataProvider,
+            ),
+            ChangeNotifierProvider<ShamorZachorProgressProvider>.value(
+              value: progressProvider,
+            ),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: BlocProvider.value(
+                value: settingsBloc,
+                child: const ShamorZachorMainScreen(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(find.text('שגיאה בטעינת הנתונים'), findsOneWidget);
+
+      await tester.tap(find.text('נסה שוב'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(dataProvider.loadAllDataCallCount, 1);
+      expect(progressProvider.retryCallCount, 1);
+      expect(find.text('שגיאה בטעינת הנתונים'), findsNothing);
+      expect(find.text('ספר פעיל'), findsOneWidget);
+    });
+
     testWidgets('book card recomputes state for a different book widget',
         (tester) async {
       await tester.pumpWidget(
@@ -433,6 +472,27 @@ class _FakeShamorZachorDataProvider extends ShamorZachorDataProvider {
   }
 }
 
+class _RetryableShamorZachorDataProvider extends _FakeShamorZachorDataProvider {
+  ShamorZachorError? _currentError = ShamorZachorError(
+    type: ShamorZachorErrorType.storageUnavailable,
+    message: 'data load failed',
+  );
+  int loadAllDataCallCount = 0;
+
+  @override
+  ShamorZachorError? get error => _currentError;
+
+  @override
+  Future<void> ensureLoaded() async {}
+
+  @override
+  Future<void> loadAllData() async {
+    loadAllDataCallCount++;
+    _currentError = null;
+    notifyListeners();
+  }
+}
+
 class _FakeShamorZachorProgressProvider extends ShamorZachorProgressProvider {
   static final Map<int, Map<String, PageProgress>> _progressByBookId = {
     1: {
@@ -505,6 +565,17 @@ class _FakeShamorZachorProgressProvider extends ShamorZachorProgressProvider {
   @override
   String? getCompletionDateSyncById(int bookId) {
     return bookId == 2 ? 'א׳ ניסן תשפ"ו' : null;
+  }
+}
+
+class _CountingShamorZachorProgressProvider
+    extends _FakeShamorZachorProgressProvider {
+  int retryCallCount = 0;
+
+  @override
+  Future<void> retry() async {
+    retryCallCount++;
+    notifyListeners();
   }
 }
 

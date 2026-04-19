@@ -132,6 +132,7 @@ class ShamorZachorProgressProvider with ChangeNotifier {
     // Prevent race condition - if already loading, return immediately
     if (_isLoading) return;
 
+    final stopwatch = Stopwatch()..start();
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -140,13 +141,23 @@ class ShamorZachorProgressProvider with ChangeNotifier {
       // Load old format (for backward compatibility)
       _fullProgress = await _progressService.loadFullProgressData();
       _completionDates = await _progressService.loadCompletionDates();
+      if (kDebugMode) {
+        _logger.info(
+            'Shamor Zachor progress: loaded legacy progress in ${stopwatch.elapsedMilliseconds}ms');
+      }
 
       // Load new format (by ID)
       _progressById = await _progressService.loadProgressDataById();
       _completionDatesById = await _progressService.loadCompletionDatesById();
+      if (kDebugMode) {
+        _logger.info(
+            'Shamor Zachor progress: loaded ID progress in ${stopwatch.elapsedMilliseconds}ms');
+      }
 
-      _logger.info(
-          'Successfully loaded progress: ${_fullProgress.length} categories (old), ${_progressById.length} books (new)');
+      if (kDebugMode) {
+        _logger.info(
+            'Successfully loaded progress: ${_fullProgress.length} categories (old), ${_progressById.length} books (new) in ${stopwatch.elapsedMilliseconds}ms');
+      }
 
       // Run migration if needed (only if we have a data provider)
       if (_dataProvider != null) {

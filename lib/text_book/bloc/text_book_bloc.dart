@@ -108,8 +108,12 @@ List<Link> _computeVisibleLinks({
   return visibleLinks;
 }
 
-Future<({List<Link> links, Map<int, List<Link>> linksByLine, List<Link> visibleLinks})>
-    _processLinksForState({
+Future<
+    ({
+      List<Link> links,
+      Map<int, List<Link>> linksByLine,
+      List<Link> visibleLinks
+    })> _processLinksForState({
   required List<Link> existingLinks,
   required List<Link> incomingLinks,
   required bool replaceExisting,
@@ -351,6 +355,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     LoadContent event,
     Emitter<TextBookState> emit,
   ) async {
+    final loadStopwatch = Stopwatch()..start();
     TextBook book;
     String searchText;
     Map<String, Map<String, bool>> searchOptions = {};
@@ -412,6 +417,19 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       return; // Invalid state combination
     }
 
+    void logLoadStep(String message) {
+      if (!kDebugMode) {
+        return;
+      }
+
+      debugPrint(
+        '[TextBookOpenPerf] ${book.title}: '
+        '+${loadStopwatch.elapsedMilliseconds}ms LoadContent $message',
+      );
+    }
+
+    logLoadStep('started');
+
     try {
       // ── שלב 1: התחלת טעינות מקבילות ──
       // מתחילים את טעינת TOC במקביל לטעינת התוכן כדי לחסוך זמן
@@ -419,6 +437,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
 
       // טעינת תוכן הספר (עם fallback ל-preview אם ריק)
       String content = await repository.getBookContent(book);
+      logLoadStep('content loaded (${content.length} chars)');
       List<String>? contentLines;
       if (content.isEmpty) {
         // Load quick preview (40 lines) for instant display
@@ -436,16 +455,20 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
 
           // Load full book in background
           _loadFullBookInBackground(book);
+          logLoadStep('quick preview loaded (${contentLines.length} lines)');
         } else {
           // Preview failed, load full book normally
           content = await repository.getBookContent(book);
+          logLoadStep('fallback content loaded (${content.length} chars)');
         }
       }
 
       contentLines ??= await _splitContentLines(content);
+      logLoadStep('content split (${contentLines.length} lines)');
 
       // ── שלב 2: המתנה ל-TOC (כבר רץ במקביל, צפוי להיות מוכן) ──
       final tableOfContents = await tocFuture;
+      logLoadStep('TOC loaded (${tableOfContents.length} entries)');
 
       // ── שלב 3: חישובים מהירים שלא דורשים I/O כבד ──
       // חישוב כותרת נוכחית (תלוי ב-TOC שכבר מוכן)
@@ -474,6 +497,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         removeNikudFromTanach: removeNikudFromTanach,
         isTanach: isTanach,
       );
+      logLoadStep('reader flags resolved');
 
       // קישורים מתחילים ריקים - יטענו ברקע אחרי הצגת הספר
       const List<Link> emptyLinks = [];
@@ -538,6 +562,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       // ── שלב 4: EMIT ראשוני - הצגת הספר מיידית! ──
       // בטעינה ראשונית: מפרשים ריקים, ייטענו ברקע
       // ב-preserveState: שימור מפרשים קיימים כדי למנוע הבהוב
+      logLoadStep('emitting TextBookLoaded');
       emit(TextBookLoaded(
         book: book,
         content: contentLines,
@@ -547,11 +572,11 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         tableOfContents: tableOfContents,
         fontSize: event.fontSize,
         showLeftPane: event.forceCloseLeftPane
-          ? false
-          : resolveInitialReadingLeftPaneVisibility(
-            explicitOpen: showLeftPane,
-            hasSearchText: searchText.isNotEmpty,
-            ),
+            ? false
+            : resolveInitialReadingLeftPaneVisibility(
+                explicitOpen: showLeftPane,
+                hasSearchText: searchText.isNotEmpty,
+              ),
         showSplitView: event.showSplitView,
         showPageShapeView: initialShowPageShapeView,
         activeCommentators: commentators,
@@ -561,7 +586,8 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
             : removeNikud,
         isTanach: isTanach,
         visibleIndices: visibleIndices,
-        pinLeftPane: preservedPinLeftPane ?? (Settings.getValue<bool>('key-pin-sidebar') ?? false),
+        pinLeftPane: preservedPinLeftPane ??
+            (Settings.getValue<bool>('key-pin-sidebar') ?? false),
         searchText: searchText,
         searchOptions: searchOptions,
         alternativeWords: alternativeWords,
@@ -581,6 +607,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
             ? (state as TextBookLoaded).selectedTextEnd
             : null,
       ));
+      logLoadStep('TextBookLoaded emitted');
 
       // ── שלב 5: טעינות ברקע - לא חוסמות את ה-UI ──
       _resetLoadedLinksWindow(book);
@@ -762,8 +789,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       );
       emit(updatedState);
       if (_shouldLoadLinksForState(updatedState)) {
-        final targetIndices =
-            _targetIndicesForCommentaryRefresh(updatedState);
+        final targetIndices = _targetIndicesForCommentaryRefresh(updatedState);
         _loadLinksInBackground(
           updatedState.book,
           targetIndices,
@@ -871,7 +897,8 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
           visibleIndices: event.visibleIndecies,
           currentTitle: newTitle,
           selectedIndex: index,
-          clearSelectedIndex: index == null && currentState.selectedIndex != null,
+          clearSelectedIndex:
+              index == null && currentState.selectedIndex != null,
           visibleLinks: visibleLinks,
         ));
 
@@ -1048,9 +1075,9 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   }
 
   bool _shouldLoadLinksForState(TextBookLoaded state) {
-    return state.showSplitView ||
-        state.showPageShapeView ||
-        state.activeCommentators.isNotEmpty;
+    // גם בתצוגה רגילה טוענים קישורי non-commentary לחלון הגלוי,
+    // כדי שתפריט ההקשר "קישורים" יעבוד ללא תלות בחלונית הצד.
+    return true;
   }
 
   bool _shouldLoadLinksForVisibleIndicesChange(TextBookLoaded state) {
@@ -1200,7 +1227,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         selectedTextStart: event.start,
         selectedTextEnd: event.end,
       ));
-
     }
   }
 
@@ -1538,8 +1564,9 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     } else {
       final runtimeState = state;
       if (runtimeState is TextBookLoaded) {
-      targetBookTitles = await _resolveTargetBookTitlesForLinks(runtimeState);
-      targetBookTitlesSignature = _targetBookTitlesSignature(targetBookTitles);
+        targetBookTitles = await _resolveTargetBookTitlesForLinks(runtimeState);
+        targetBookTitlesSignature =
+            _targetBookTitlesSignature(targetBookTitles);
       }
     }
 

@@ -374,15 +374,6 @@ class _CombinedViewState extends State<CombinedView> {
     final linkChildren = state.visibleLinks
         .map((link) => AppContextMenuEntry(
               label: link.fallbackDisplayReference,
-              labelWidget: FutureBuilder<String>(
-                future: link.displayReference,
-                builder: (context, snapshot) => Text(
-                  snapshot.data ?? link.fallbackDisplayReference,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: TextDirection.rtl,
-                ),
-              ),
               onTap: () => widget.openBookCallback(
                 TextBookTab(
                   book: TextBook(title: utils.getTitleFromPath(link.path2)),
@@ -472,7 +463,8 @@ class _CombinedViewState extends State<CombinedView> {
             return AppContextMenuEntry(
               label: item.label,
               onTap: () {
-                unawaited(PluginRuntimeDispatcher.instance.dispatchEventToPlugin(
+                unawaited(
+                    PluginRuntimeDispatcher.instance.dispatchEventToPlugin(
                   pluginId,
                   'reader.context_menu_item_clicked',
                   {
@@ -1266,7 +1258,6 @@ class _CombinedViewState extends State<CombinedView> {
         lastTitle = utils.getTitleFromPath(link.path2);
       }
       return lastTitle != null && activeCommentatorsSet.contains(lastTitle!);
-
     });
   }
 

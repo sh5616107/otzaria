@@ -514,15 +514,6 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     final linkChildren = relevantLinks
         .map((link) => AppContextMenuEntry(
               label: link.fallbackDisplayReference,
-              labelWidget: FutureBuilder<String>(
-                future: link.displayReference,
-                builder: (context, snapshot) => Text(
-                  snapshot.data ?? link.fallbackDisplayReference,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: TextDirection.rtl,
-                ),
-              ),
               onTap: () => openBook(
                 menuContext,
                 TextBook(title: utils.getTitleFromPath(link.path2)),

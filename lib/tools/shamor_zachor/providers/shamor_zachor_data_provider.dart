@@ -10,6 +10,13 @@ import 'package:otzaria/migration/core/models/toc_entry.dart' as db_models;
 
 import '../models/book_model.dart';
 import '../models/error_model.dart';
+import '../services/shamor_zachor_bootstrap_worker.dart';
+
+typedef ShamorZachorCategoryTreeLoader = Future<Map<String, dynamic>> Function({
+  required String dbPath,
+  required List<int> trackedBookIds,
+  required bool includeDebugCategories,
+});
 
 /// Provider for managing book data in Shamor Zachor
 /// This provider is scoped locally within the ShamorZachorWidget
@@ -21,6 +28,7 @@ class ShamorZachorDataProvider with ChangeNotifier {
 
   // Dependencies
   final SqliteDataProvider? _sqliteDataProvider;
+  final ShamorZachorCategoryTreeLoader _categoryTreeLoader;
 
   // State - now uses shared cache
   Map<String, BookCategory> _allBookData = {};
@@ -46,7 +54,10 @@ class ShamorZachorDataProvider with ChangeNotifier {
   /// slowing down app startup. Call ensureLoaded() when the widget is displayed.
   ShamorZachorDataProvider({
     SqliteDataProvider? sqliteDataProvider,
-  }) : _sqliteDataProvider = sqliteDataProvider ?? SqliteDataProvider.instance;
+    ShamorZachorCategoryTreeLoader? categoryTreeLoader,
+  })  : _sqliteDataProvider = sqliteDataProvider ?? SqliteDataProvider.instance,
+        _categoryTreeLoader =
+            categoryTreeLoader ?? ShamorZachorBootstrapWorker.loadCategoryTree;
 
   /// Ensures data is loaded - call this when the widget is first displayed
   ///
@@ -61,6 +72,7 @@ class ShamorZachorDataProvider with ChangeNotifier {
 
   Future<void> loadAllData() async {
     if (_isLoading) return;
+    final stopwatch = Stopwatch()..start();
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -80,18 +92,53 @@ class ShamorZachorDataProvider with ChangeNotifier {
       // Load tracked books list from SharedPreferences
       await _loadTrackedBooksList();
 
+      try {
+        final workerResult = await _categoryTreeLoader(
+          dbPath: _sqliteDataProvider.dbPath,
+          trackedBookIds: _trackedBookIds.toList(),
+          includeDebugCategories: kDebugMode,
+        );
+        final categories = (workerResult['categories'] as List)
+            .map((raw) => (raw as Map).cast<String, dynamic>())
+            .toList();
+        _allBookData = _hydrateCategoryTree(categories);
+        if (kDebugMode) {
+          _logger.info(
+              'Loaded ${_allBookData.length} top-level categories in isolate '
+              '(${workerResult['relevantBookCount']} relevant books, '
+              '${workerResult['allBookCount']} total books, '
+              '${workerResult['categoryCount']} categories) '
+              'in ${stopwatch.elapsedMilliseconds}ms.');
+        }
+        return;
+      } catch (e, stackTrace) {
+        _logger.warning(
+          'Failed to load Shamor Zachor data in isolate, falling back to main isolate',
+          e,
+          stackTrace,
+        );
+      }
+
       // OPTIMIZATION 1 & 2: Use existing getAllBooks() query with in-memory filter
       // Show baseBooks OR books that are in the tracked list
       final allBooks = await repository.database.bookDao.getAllBooks();
       final relevantBooks = allBooks
           .where((book) => book.isBaseBook || _trackedBookIds.contains(book.id))
           .toList();
+      if (kDebugMode) {
+        _logger.info(
+            'Shamor Zachor loadAllData: loaded ${allBooks.length} books in ${stopwatch.elapsedMilliseconds}ms');
+      }
 
       // OPTIMIZATION 2: Reuse categories from SqliteDataProvider cache if available
       // This avoids duplicate category queries
       final allCategories =
           await repository.database.categoryDao.getAllCategories();
       final categoryMap = {for (var c in allCategories) c.id: c};
+      if (kDebugMode) {
+        _logger.info(
+            'Shamor Zachor loadAllData: loaded ${allCategories.length} categories in ${stopwatch.elapsedMilliseconds}ms');
+      }
 
       // 3. Build Category Tree Structure
       final Map<String, BookCategory> resultData = {};
@@ -119,8 +166,10 @@ class ShamorZachorDataProvider with ChangeNotifier {
       }
 
       _allBookData = resultData;
-      _logger.info(
-          'Loaded ${_allBookData.length} top-level categories from DB using shared cache (${relevantBooks.length} books).');
+      if (kDebugMode) {
+        _logger.info(
+            'Loaded ${_allBookData.length} top-level categories from DB using shared cache (${relevantBooks.length} books) in ${stopwatch.elapsedMilliseconds}ms.');
+      }
     } catch (e, stackTrace) {
       _logger.severe('Error loading from DB', e, stackTrace);
       _error = ShamorZachorError.fromException(e, stackTrace: stackTrace);
@@ -128,6 +177,53 @@ class ShamorZachorDataProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Map<String, BookCategory> _hydrateCategoryTree(
+    List<Map<String, dynamic>> categories,
+  ) {
+    return {
+      for (final category in categories)
+        category['name'] as String: _hydrateCategory(category),
+    };
+  }
+
+  BookCategory _hydrateCategory(Map<String, dynamic> json) {
+    final booksJson = json['books'] as Map;
+    return BookCategory(
+      name: json['name'] as String,
+      contentType: json['contentType'] as String,
+      books: {
+        for (final entry in booksJson.entries)
+          entry.key as String:
+              _hydrateBookDetails((entry.value as Map).cast<String, dynamic>()),
+      },
+      defaultStartPage: json['defaultStartPage'] as int? ?? 1,
+      isCustom: json['isCustom'] as bool? ?? false,
+      sourceFile: json['sourceFile'] as String? ?? 'db',
+      subcategories: (json['subcategories'] as List?)
+          ?.map((raw) => _hydrateCategory((raw as Map).cast<String, dynamic>()))
+          .toList(),
+      parentCategoryName: json['parentCategoryName'] as String?,
+      schemaVersion: json['schemaVersion'] as int?,
+    );
+  }
+
+  BookDetails _hydrateBookDetails(Map<String, dynamic> json) {
+    return BookDetails(
+      contentType: json['contentType'] as String,
+      parts: (json['parts'] as List)
+          .map((raw) => BookPart.fromJson((raw as Map).cast<String, dynamic>()))
+          .toList(),
+      isCustom: json['isCustom'] as bool? ?? false,
+      id: json['id'] as int?,
+      originalPageCount: json['originalPageCount'] as num?,
+      sections: (json['sections'] as List?)
+          ?.map((raw) =>
+              BookSection.fromJson((raw as Map).cast<String, dynamic>()))
+          .toList(),
+      categoryPath: json['categoryPath'] as String?,
+    );
   }
 
   Future<BookCategory?> _buildRecursiveCategory(

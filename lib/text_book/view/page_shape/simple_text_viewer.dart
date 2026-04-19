@@ -592,15 +592,6 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
             link.end == null)
         .map((link) => AppContextMenuEntry(
               label: link.fallbackDisplayReference,
-              labelWidget: FutureBuilder<String>(
-                future: link.displayReference,
-                builder: (context, snapshot) => Text(
-                  snapshot.data ?? link.fallbackDisplayReference,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: TextDirection.rtl,
-                ),
-              ),
               onTap: () => widget.openBookCallback(
                 TextBookTab(
                   book: TextBook(title: utils.getTitleFromPath(link.path2)),

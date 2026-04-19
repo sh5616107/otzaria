@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:otzaria/core/ui_snack.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -93,6 +94,9 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   Book? _pdfBook; // Companion PDF
   bool _hasPdfBook = false;
   bool _leftPaneAutoCloseQueuedByScroll = false;
+  late final Stopwatch _openStopwatch;
+  int _shamorZachorBootstrapGeneration = 0;
+  String? _shamorZachorBootstrapBookTitle;
 
   // Key עבור PageShapeScreen - שינוי המפתח יגרום לבנייה מחדש
   Key _pageShapeKey = UniqueKey();
@@ -459,19 +463,8 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   @override
   void initState() {
     super.initState();
-
-    // טעינת נתוני שמור וזכור ברקע כדי שהמצב יהיה נכון בפתיחת ספר
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-
-      context.read<ShamorZachorDataProvider>().ensureLoaded().then((_) {
-        if (mounted) {
-          context.read<ShamorZachorProgressProvider>().ensureLoaded();
-        }
-      });
-    });
+    _openStopwatch = Stopwatch()..start();
+    _logOpenPerf('TextBookViewerBloc.initState');
 
     // רישום ה-FocusNode ב-FocusRepository
     _focusRepository = context.read<FocusRepository>();
@@ -670,8 +663,75 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
   bool _hasAltTitles = true; // נניח שיש בהתחלה, נעדכן אחרי בדיקה
 
+  void _logOpenPerf(String message) {
+    if (!kDebugMode) {
+      return;
+    }
+
+    debugPrint(
+      '[TextBookOpenPerf] ${widget.tab.book.title}: '
+      '+${_openStopwatch.elapsedMilliseconds}ms $message',
+    );
+  }
+
+  void _scheduleShamorZachorBootstrapAfterBookLoaded(TextBookLoaded state) {
+    final bookTitle = state.book.title;
+    if (_shamorZachorBootstrapBookTitle == bookTitle) {
+      return;
+    }
+
+    _shamorZachorBootstrapBookTitle = bookTitle;
+    final generation = ++_shamorZachorBootstrapGeneration;
+    _logOpenPerf('TextBookLoaded first emitted; schedule Shamor Zachor');
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _shamorZachorBootstrapGeneration) {
+        return;
+      }
+
+      unawaited(_bootstrapShamorZachorAfterBookLoaded(generation, bookTitle));
+    });
+  }
+
+  Future<void> _bootstrapShamorZachorAfterBookLoaded(
+    int generation,
+    String bookTitle,
+  ) async {
+    final stopwatch = Stopwatch()..start();
+    _logOpenPerf('Shamor Zachor bootstrap started');
+
+    try {
+      final dataProvider = context.read<ShamorZachorDataProvider>();
+      final progressProvider = context.read<ShamorZachorProgressProvider>();
+
+      await dataProvider.ensureLoaded();
+      if (!mounted || generation != _shamorZachorBootstrapGeneration) {
+        return;
+      }
+      _logOpenPerf(
+        'Shamor Zachor data ready in ${stopwatch.elapsedMilliseconds}ms',
+      );
+
+      await progressProvider.ensureLoaded();
+      if (!mounted || generation != _shamorZachorBootstrapGeneration) {
+        return;
+      }
+
+      _logOpenPerf(
+        'Shamor Zachor bootstrap completed for $bookTitle '
+        'in ${stopwatch.elapsedMilliseconds}ms',
+      );
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('Shamor Zachor bootstrap failed: $e\n$st');
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _shamorZachorBootstrapGeneration++;
+
     // ביטול רישום ה-FocusNode מ-FocusRepository (שימוש בהפניה שנשמרה)
     _focusRepository?.unregisterBookContentFocusNode(_bookContentFocusNode);
 
@@ -800,6 +860,8 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
                 // }
 
                 if (state is TextBookLoaded) {
+                  _scheduleShamorZachorBootstrapAfterBookLoaded(state);
+
                   if (!state.showLeftPane) {
                     _leftPaneAutoCloseQueuedByScroll = false;
                   }
@@ -836,6 +898,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
                     });
                   }
 
+                  _logOpenPerf('dispatch LoadContent from TextBookInitial');
                   context.read<TextBookBloc>().add(
                         LoadContent(
                           fontSize: settingsState.fontSize,

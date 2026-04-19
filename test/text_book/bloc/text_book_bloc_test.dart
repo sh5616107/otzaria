@@ -19,7 +19,7 @@ void main() {
       await Settings.init(cacheProvider: _MemoryCacheProvider());
     });
 
-    test('בתצוגה רגילה ללא חלונית פעילה לא טוען קישורים מיד', () async {
+    test('בתצוגה רגילה טוען קישורי non-commentary לחלון הנוכחי', () async {
       final repository = _FakeTextBookRepository();
       final bloc =
           _createBloc(repository: repository, showPageShapeView: false);
@@ -35,12 +35,13 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      expect(repository.getBookLinksInRangeCalls, 0);
+      expect(repository.getBookLinksInRangeCalls, 1);
+      expect(repository.lastTargetBookTitles, isEmpty);
 
       await bloc.close();
     });
 
-    test('באתחול ספר ללא חלונית פעילה לא מבקש חלון קישורים', () async {
+    test('באתחול ספר רגיל מבקש חלון קישורים עבור הטווח הגלוי', () async {
       final repository = _FakeTextBookRepository();
       final bloc =
           _createBloc(repository: repository, showPageShapeView: false);
@@ -56,15 +57,16 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      expect(repository.getBookLinksInRangeCalls, 0);
-      expect(repository.lastStartIndex, isNull);
-      expect(repository.lastEndIndex, isNull);
-      expect(repository.lastTargetBookTitles, isNull);
+      expect(repository.getBookLinksInRangeCalls, 1);
+      expect(repository.lastStartIndex, isNotNull);
+      expect(repository.lastEndIndex, isNotNull);
+      expect(repository.lastTargetBookTitles, isEmpty);
 
       await bloc.close();
     });
 
-    test('בתצוגה רגילה ללא חלונית מפרשים לא מתבצעת כלל טעינת קישורים',
+    test(
+        'בתצוגה רגילה ללא מפרשים פעילים פילטר היעדים ריק ולכן נטענים רק non-commentary',
         () async {
       final repository = _FakeTextBookRepository();
       final bloc =
@@ -81,8 +83,8 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      expect(repository.getBookLinksInRangeCalls, 0);
-      expect(repository.lastTargetBookTitles, isNull);
+      expect(repository.getBookLinksInRangeCalls, 1);
+      expect(repository.lastTargetBookTitles, isEmpty);
 
       await bloc.close();
     });

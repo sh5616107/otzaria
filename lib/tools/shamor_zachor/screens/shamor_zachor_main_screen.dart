@@ -367,11 +367,20 @@ class _ShamorZachorMainScreenState extends State<ShamorZachorMainScreen>
                       RecommendedActionButton(
                         text: 'נסה שוב',
                         onPressed: () async {
-                          await dataProvider.loadAllData();
-                          if (!context.mounted) {
-                            return;
+                          final shouldRetryProgress =
+                              dataProvider.error != null ||
+                                  progressProvider.error != null;
+
+                          if (dataProvider.error != null) {
+                            await dataProvider.loadAllData();
+                            if (!context.mounted) {
+                              return;
+                            }
                           }
-                          await progressProvider.retry();
+
+                          if (shouldRetryProgress) {
+                            await progressProvider.retry();
+                          }
                         },
                       )
                     ]));
