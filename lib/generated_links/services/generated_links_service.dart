@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
+import 'package:flutter/foundation.dart';
 import 'package:otzaria/generated_links/repository/generated_links_book_resolver.dart';
 import 'package:otzaria/generated_links/repository/generated_links_cache_store.dart';
 import 'package:otzaria/generated_links/rules/generated_link_rules_registry.dart';
@@ -28,8 +29,12 @@ class GeneratedLinksService {
 
   /// אתחול ה-singleton. בטוח לקריאה מרובה — רק הראשונה תעשה משהו.
   static Future<void> init() async {
-    if (_instance != null) return;
+    if (_instance != null) {
+      debugPrint('[GeneratedLinksService] Already initialized');
+      return;
+    }
 
+    debugPrint('[GeneratedLinksService] Starting initialization...');
     final store = await GeneratedLinksCacheStore.create();
     final gate = GeneratedLinksWorkGate();
     final resolver = GeneratedLinksBookResolver();

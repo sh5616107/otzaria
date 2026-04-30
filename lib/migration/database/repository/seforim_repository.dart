@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' hide Category;
 import 'package:logging/logging.dart';
 
 import '../../models/author.dart';
@@ -2598,7 +2599,10 @@ extension BookAcronymRepository on SeforimRepository {
     final amud = tokens.length >= 2 ? tokens[1] : 'א';
     if (amud != 'א' && amud != 'ב') return null;
 
-    return 'דף $daf${amud == 'ב' ? ':' : '.'}';
+    final result = 'דף $daf${amud == 'ב' ? ':' : '.'}';
+    debugPrint(
+        '[SeforimRepository] _exactGemaraDafTocText: queryTokens=$queryTokens → result="$result"');
+    return result;
   }
 
   /// Normalizes text for TOC matching (same as FindRef normalization)

@@ -6,6 +6,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -471,17 +472,9 @@ Future<void> _heavyInitialize() async {
   await createDirs();
   await loadCerts();
 
-  await SqliteDataProvider.instance.initialize();
+  await _migrateWindowsLibraryPathFromInstallerPrefs();
 
-  try {
-    await GeneratedLinksService.init();
-  } catch (error, stackTrace) {
-    _logNonFatalInitializationError(
-      'GeneratedLinksService',
-      error,
-      stackTrace,
-    );
-  }
+  await SqliteDataProvider.instance.initialize();
 
   try {
     final cacheDir = await getTemporaryDirectory();
@@ -524,15 +517,7 @@ Future<void> _heavyInitialize() async {
         'Direct error report queue', error, stackTrace);
   }
 
-  try {
-    await GeneratedLinksService.init();
-  } catch (error, stackTrace) {
-    _logNonFatalInitializationError(
-      'GeneratedLinksService',
-      error,
-      stackTrace,
-    );
-  }
+  await _initializeGeneratedLinks();
 }
 
 Future<void> _enqueueExternalActivationArgs(List<String> args) async {
@@ -554,6 +539,72 @@ Future<void> _enqueueExternalActivationArgs(List<String> args) async {
         },
       );
     }
+  }
+}
+
+Future<void> _migrateWindowsLibraryPathFromInstallerPrefs() async {
+  if (!Platform.isWindows) return;
+
+  final currentLibraryPath =
+      Settings.getValue<String>(SettingsRepository.keyLibraryPath);
+  if (currentLibraryPath != null && currentLibraryPath.isNotEmpty) {
+    return;
+  }
+
+  try {
+    final prefsFile = File(
+      '${await AppPaths.getDataRootPath()}${Platform.pathSeparator}shared_preferences.json',
+    );
+    if (!await prefsFile.exists()) {
+      return;
+    }
+
+    final rawPrefs = (await prefsFile.readAsString()).trim();
+    if (rawPrefs.isEmpty) {
+      return;
+    }
+
+    final decoded = json.decode(rawPrefs);
+    if (decoded is! Map) {
+      return;
+    }
+
+    final prefixedValue =
+        decoded['flutter.${SettingsRepository.keyLibraryPath}'];
+    final legacyValue = decoded[SettingsRepository.keyLibraryPath];
+    final migratedPath = prefixedValue is String && prefixedValue.isNotEmpty
+        ? prefixedValue
+        : legacyValue is String && legacyValue.isNotEmpty
+            ? legacyValue
+            : null;
+
+    if (migratedPath == null) {
+      return;
+    }
+
+    await Settings.setValue(SettingsRepository.keyLibraryPath, migratedPath);
+  } catch (error, stackTrace) {
+    _logNonFatalInitializationError(
+      'Windows installer library path migration',
+      error,
+      stackTrace,
+    );
+  }
+}
+
+Future<void> _initializeGeneratedLinks() async {
+  try {
+    debugPrint('[main.dart] Calling GeneratedLinksService.init()...');
+    await GeneratedLinksService.init();
+    debugPrint(
+        '[main.dart] GeneratedLinksService.init() completed successfully');
+  } catch (error, stackTrace) {
+    debugPrint('[main.dart] GeneratedLinksService.init() FAILED: $error');
+    _logNonFatalInitializationError(
+      'GeneratedLinksService',
+      error,
+      stackTrace,
+    );
   }
 }
 

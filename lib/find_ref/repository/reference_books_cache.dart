@@ -75,6 +75,9 @@ class ReferenceBooksCache {
     final q = _normalizeForMatch(query);
     if (q.isEmpty) return const <ReferenceBookHit>[];
 
+    debugPrint(
+        '[ReferenceBooksCache] Searching for: "$query" (normalized: "$q")');
+
     final starts = <ReferenceBookHit>[];
     final contains = <ReferenceBookHit>[];
 
